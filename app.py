@@ -1,6 +1,6 @@
 import os
 
-from flask import Flask, render_template, request, flash, redirect, session, g
+from flask import Flask, render_template, request, flash, redirect, session, g, url_for
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
@@ -149,6 +149,7 @@ def users_show(user_id):
     """Show user profile."""
 
     user = User.query.get_or_404(user_id)
+    numlikes = len(user.likes)
 
     # snagging messages in order from the database;
     # user.messages won't be in order by default
@@ -158,7 +159,7 @@ def users_show(user_id):
                 .order_by(Message.timestamp.desc())
                 .limit(100)
                 .all())
-    return render_template('users/show.html', user=user, messages=messages)
+    return render_template('users/show.html', user=user, messages=messages, numlikes=numlikes)
 
 
 @app.route('/users/<int:user_id>/following')
@@ -235,6 +236,8 @@ def profile():
                 curr_user.image_url = form.image_url.data
                 curr_user.header_image_url = form.header_image_url.data
                 curr_user.bio = form.bio.data
+                curr_user.location = form.location.data
+                db.session.commit()
             else:
                 flash('Password does not match', 'danger')
                 return redirect('/')
@@ -261,31 +264,56 @@ def delete_user():
 
     return redirect("/signup")
 
-@app.route('/users/<int:user_id>/edit', methods=["GET", "POST"])
-def edit_user(user_id):
-    """Edit a user. Check to see if user is logged in, check their password before allowing edits"""
 
-    curr_user = User.query.get(user_id)
 
-    if user_id != session['CURR_USER_KEY']:
-        flash("Access unauthorized.", "danger")
-        return redirect('/')
+
+@app.route('/users/add_like/<int:msg_id>', methods=["POST"])
+def add_like(msg_id):
+    """Add a message/post to a user's liked messages. Check for login first"""
+    if not g.user:
+        flash('You must be logged in to like posts', 'danger')
+        return redirect('/login')
     else:
-        form = userEditForm(obj=curr_user)
-        if form.validate_on_submit():
-            if User.authenticate(username = curr_user.username, password=form.password.data):
-                curr_user.username = form.username.data
-                curr_user.email = form.email.data
-                curr_user.image_url = form.image_url.data
-                curr_user.header_image_url = form.header_image_url.data
-                curr_user.bio = form.bio.data
-            else:
-                flash('Password does not match', 'danger')
-                return redirect(f'/users/{user_id}')
+        msg = Message.query.get_or_404(msg_id)
+        g.user.likes.append(msg)
 
-            return(f'/users/{curr_user.id}')
-        else:
-            return render_template('edit.html', form=form)
+        db.session.commit()
+
+        
+        # return user to whatever page they came from
+        return redirect(redirect_url())
+
+
+# Function for returning a user to the page they came from 
+def redirect_url(default='index'):
+    return request.args.get('next') or \
+           request.referrer or \
+           url_for(homepage)
+
+@app.route('/users/remove_like/<int:msg_id>', methods=["POST"])
+def remove_like(msg_id):
+    """Remove a message from user's liked messages. Check for login first"""
+    if not g.user:
+        flash('You must be logged in to like/unlike posts', 'danger')
+        return redirect(url_for(login))
+    else:
+        msg = Message.query.get_or_404(msg_id)
+        g.user.likes.remove(msg)
+
+        db.session.commit()
+
+        return redirect(redirect_url())
+
+
+@app.route('/users/<int:user_id>/likes')
+def show_liked_messages(user_id):
+    """Show a user's liked posts. If the user has not liked any posts, display a message with a redirect link to homepage"""
+    
+    user = User.query.get_or_404(user_id)
+    likes = user.likes
+    
+
+    return render_template('/users/likes.html', user=user, messages=likes, numlikes=len(likes) )
 
 
     
@@ -338,6 +366,7 @@ def messages_destroy(message_id):
     db.session.delete(msg)
     db.session.commit()
 
+
     return redirect(f"/users/{g.user.id}")
 
 
@@ -354,14 +383,17 @@ def homepage():
     """
 
     if g.user:
+        following_ids = [follower.id for follower in g.user.following]
+        following_ids.append(g.user.id) # Append user's own id to list of followed users so they see their own posts
+
         messages = (Message
                     .query
-                    .filter_by(g.user.followed_user)
+                    .filter(Message.user_id.in_(following_ids))
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())
 
-        return render_template('home.html', messages=messages)
+        return render_template('home.html', messages=messages, user=g.user)
 
     else:
         return render_template('home-anon.html')

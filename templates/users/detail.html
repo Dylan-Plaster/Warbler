@@ -1,10 +1,12 @@
 {% extends 'base.html' %} {% block content %}
 
 <div id="warbler-hero" class="full-width">
+  
   <img
     src="{{user.header_image_url}}"
     alt="Background for {{user.username}}"
     id="profile-header"
+    class=""
   />
 </div>
 <img
@@ -41,7 +43,8 @@
           </li>
           <li class="stat">
             <p class="small">Likes</p>
-            <h4>TBD</h4>
+            <h4><a href="/users/{{user.id}}/likes">{{numlikes}}</a></h4>
+            
           </li>
           <div class="ml-auto">
             {% if g.user.id == user.id %}
